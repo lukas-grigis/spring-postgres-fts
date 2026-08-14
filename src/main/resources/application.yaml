@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: spring-postgres-fts
+  datasource:
+    url: jdbc:postgresql://localhost:5432/booksearch
+    username: booksearch
+    password: booksearch
+    hikari:
+      # Session-level GUC, set once per physical connection at creation (Hikari does not reset
+      # session state between borrows) — makes the % operator's threshold match the FUZZY
+      # Criteria predicate everywhere, both here and in the native RRF query's fuzzy CTE.
+      connection-init-sql: SET pg_trgm.similarity_threshold = 0.2
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Liquibase owns the schema; Hibernate only checks it matches the entities.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.xml
+  data:
+    web:
+      pageable:
+        # Replaces the old @Max(100) on a hand-rolled size parameter; Spring clamps rather than
+        # rejecting, so an absurd page size is capped instead of 400-ing.
+        max-page-size: 100
+        default-page-size: 10
+  mvc:
+    # One error shape for the whole API: RFC 9457 application/problem+json, produced by Boot
+    # rather than by a hand-written @ExceptionHandler.
+    problemdetails:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
