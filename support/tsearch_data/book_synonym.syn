@@ -1,0 +1,33 @@
+# Postgres synonym dictionary (TEMPLATE = synonym): "source target" — a query for `source` is
+# rewritten to lexeme `target` before matching, and — this is the part that is easy to miss —
+# the SAME rewrite runs at INDEX time too, because indexing and querying both go through the
+# `book_synonym_search` text-search configuration. A document containing the literal word
+# `target` is not a dictionary key, so it stays indexed as `target`; a document containing
+# literal `source` is rewritten to `target` at index time. Both ends converge on `target`,
+# which is what makes `source` find a document that only says `target`.
+#
+# ONE DIRECTION PER PAIR ONLY. Listing both "source target" AND "target source" looks
+# symmetric but is self-cancelling — and not for the reason it first appears. The same map runs
+# on both sides, so each word is swapped for the OTHER one: the document says `source` and
+# indexes as `target`, the query says `target` and is rewritten to `source`. Both sides move,
+# and they still never meet. The dictionary becomes a no-op that costs you the feature.
+# Verified against real Postgres 18 in GeneratedColumnAndSynonymDirectionIT, which builds
+# scratch dictionaries from the pair `detective sleuth`: with both directions present neither
+# word finds the other (both `f`); with one direction kept, both do (`t`).
+#
+# EVERY TARGET BELOW OCCURS IN THE SEEDED CORPUS AND EVERY SOURCE DOES NOT. That is the whole
+# demonstration: you type a word no book contains and still get books back. A pair whose target
+# is absent silently does nothing, which looks identical to the feature being broken —
+# SynonymDictionaryCorpusIT is the guard that keeps this file and the corpus in step.
+#
+# AFTER EDITING THIS FILE: Postgres read the dictionary once, when CREATE TEXT SEARCH
+# DICTIONARY ran. A new pair does not take effect until the dictionary is reloaded, and
+# idx_book_synonym_vector (001-schema.xml, changeset 009) still holds lexemes built from the old
+# mapping until it is REINDEXed. Until both happen the index and the query disagree, silently.
+# Recreating the database — `mise run infra:down && mise run demo` — is the reliable way.
+avenue street
+brook river
+casement window
+chamber room
+apothecary doctor
+vessel ship
