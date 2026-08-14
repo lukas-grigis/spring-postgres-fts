@@ -6,13 +6,13 @@ describe('sanitizeHeadline', () => {
     expect(sanitizeHeadline('a <mark>whale</mark> b')).toBe('a <mark>whale</mark> b');
   });
 
-  it('neutralises a script tag', () => {
+  it('neutralizes a script tag', () => {
     expect(sanitizeHeadline('<script>alert(1)</script>')).toBe(
       '&lt;script&gt;alert(1)&lt;/script&gt;',
     );
   });
 
-  it('neutralises an attribute-carrying tag, which a strip-tags regex would leak', () => {
+  it('neutralizes an attribute-carrying tag, which a strip-tags regex would leak', () => {
     expect(sanitizeHeadline('<img src=x onerror=alert(1)>')).toBe(
       '&lt;img src=x onerror=alert(1)&gt;',
     );

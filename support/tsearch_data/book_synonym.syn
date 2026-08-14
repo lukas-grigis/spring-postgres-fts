@@ -20,11 +20,11 @@
 # is absent silently does nothing, which looks identical to the feature being broken —
 # SynonymDictionaryCorpusIT is the guard that keeps this file and the corpus in step.
 #
-# AFTER EDITING THIS FILE: Postgres read the dictionary once, when CREATE TEXT SEARCH
-# DICTIONARY ran. A new pair does not take effect until the dictionary is reloaded, and
-# idx_book_synonym_vector (001-schema.xml, changeset 009) still holds lexemes built from the old
-# mapping until it is REINDEXed. Until both happen the index and the query disagree, silently.
-# Recreating the database — `mise run infra:down && mise run demo` — is the reliable way.
+# AFTER EDITING THIS FILE: each session reads it once, the first time it uses the dictionary —
+# sessions that already used it keep the old mapping until ALTER TEXT SEARCH DICTIONARY forces a
+# reload, and idx_book_synonym_vector (001-schema.xml, changeset 009) still holds lexemes built
+# from the old mapping until it is REINDEXed. Until both happen the index and the query disagree,
+# silently. For this demo, `mise run infra:down && mise run demo` does both at once.
 avenue street
 brook river
 casement window

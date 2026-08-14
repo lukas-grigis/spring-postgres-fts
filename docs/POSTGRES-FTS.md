@@ -3,14 +3,18 @@
 Reference for the Postgres machinery this repo uses, with a link to every primary source. If a claim in
 the [companion blog post](https://lukasgrigis.dev/blog/spring-boot-postgres-full-text-search/)
 or in this code needs backing, it is here. Nothing below is from memory: each statement links to the manual page or
-paper it paraphrases, and the behavioural claims were checked against a real
+paper it paraphrases, and the behavioral claims were checked against a real
 `postgres:18-trixie` container by the integration tests named alongside them.
+
+None of it is new, either. Full-text search has been in core Postgres
+since [8.3](https://www.postgresql.org/docs/release/8-3/), and `pg_trgm` is older still — Postgres 18 and Spring Boot
+4.1 are what this repo was built and verified on, not what makes any of it work.
 
 ## The three types
 
 Full-text search in Postgres is a pipeline between two data types.
 
-**`tsvector`** is a document after processing: a sorted list of *lexemes* (normalised word roots)
+**`tsvector`** is a document after processing: a sorted list of *lexemes* (normalized word roots)
 with their positions. `to_tsvector('english', 'The cats were running')` gives `'cat':2 'run':4` — stop words dropped,
 the rest stemmed. **`tsquery`** is a search condition over lexemes, with `&`,
 `|`, `!` and `<->` (followed-by). The `@@` operator asks whether a `tsvector` satisfies a
@@ -18,7 +22,7 @@ the rest stemmed. **`tsquery`** is a search condition over lexemes, with `&`,
 
 A **text search configuration** controls the processing: which parser splits the text, and which *dictionaries* map each
 token to a lexeme. `english` is the built-in one. This repo adds a second,
-`book_synonym_search`, which is where the synonym behaviour comes from.
+`book_synonym_search`, which is where the synonym behavior comes from.
 
 Sources: [Introduction](https://www.postgresql.org/docs/18/textsearch-intro.html),
 [Text search types](https://www.postgresql.org/docs/18/datatype-textsearch.html).
@@ -43,16 +47,19 @@ title match outranks an excerpt match without any application code.
 `STORED` must be written explicitly. **Postgres 18 changed the default for generated columns to
 `VIRTUAL`**, and a virtual column cannot be indexed — `CREATE INDEX ... USING GIN (search_vector)`
 on one fails with `indexes on virtual generated columns are not supported`. Omitting the keyword on Postgres 18
-therefore breaks the index, not the column, which is a confusing way to find out.
-`GeneratedColumnAndSynonymDirectionIT` asserts this against a live server.
+therefore breaks the index, not the column.
+[`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
+asserts this against a live server.
 
-Source: [Generated columns](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
+Source: [Generated columns](https://www.postgresql.org/docs/18/ddl-generated-columns.html) — which documents the
+`VIRTUAL` default but, notably, not the index restriction; the error text above, reproduced live, is the authority for
+that half.
 
 ## Parsing user input: use `websearch_to_tsquery`
 
 Four functions turn text into a `tsquery`, and the difference matters when the text comes from a search box:
 
-| Function               | Behaviour on `foo bar`                  | Safe for raw user input                |
+| Function               | Behavior on `foo bar`                   | Safe for raw user input                |
 |------------------------|-----------------------------------------|----------------------------------------|
 | `to_tsquery`           | syntax error — needs explicit operators | no, it throws                          |
 | `plainto_tsquery`      | `foo & bar`                             | yes, but no phrase or negation support |
@@ -61,7 +68,9 @@ Four functions turn text into a `tsquery`, and the difference matters when the t
 
 `websearch_to_tsquery` accepts the syntax people already type into search engines: quoted phrases,
 `or`, and a leading `-` for negation. It never throws on malformed input, which is why it is the only sensible choice
-for a text field. `LexicalSearchQuerySyntaxIT` covers the phrase and negation cases.
+for a text field.
+[`LexicalSearchQuerySyntaxIT`](../src/test/java/dev/lukasgrigis/booksearch/search/LexicalSearchQuerySyntaxIT.java)
+covers the phrase and negation cases.
 
 Source: [Parsing queries](https://www.postgresql.org/docs/18/textsearch-controls.html#TEXTSEARCH-PARSING-QUERIES).
 
@@ -74,17 +83,18 @@ meaningful *relative to other rows for the same query*.
 - **`ts_rank_cd`** computes *cover density*: how close the query terms sit to one another in the document. For a
   multi-word query it prefers documents where the words appear together over ones where they are scattered.
 
-This repo uses `ts_rank_cd` for LEXICAL and `ts_rank` for SYNONYM, and `RankOrderingIT` asserts the two genuinely
-disagree on the seeded corpus rather than assuming it.
+This repo uses `ts_rank_cd` for LEXICAL and `ts_rank` for SYNONYM, and
+[`RankOrderingIT`](../src/test/java/dev/lukasgrigis/booksearch/search/RankOrderingIT.java) asserts the two genuinely
+disagree on the seeded corpus. Not assumed.
 
-Both accept an optional `normalization` argument, which is a **bit mask, not a scale**: 0 is no normalisation (the
+Both accept an optional `normalization` argument, which is a **bit mask, not a scale**: 0 is no normalization (the
 default here), 1 divides by `1 + log(length)`, 2 divides by the length, 8 by the number of unique words, 32 maps the
 rank to `rank/(rank+1)`, and the bits combine. Turning it on is reasonable for a corpus with wildly varying document
-sizes; it is left as a documented seam rather than an unexplained magic number in the query.
+sizes; it is left as a documented seam, not an unexplained magic number in the query.
 
 Source: [Ranking search results](https://www.postgresql.org/docs/18/textsearch-controls.html#TEXTSEARCH-RANKING).
 
-## Highlighting: `ts_headline` does not escape
+## Highlighting: `ts_headline` does not escape — so the input is escaped first
 
 `ts_headline` returns an excerpt with the matching terms wrapped in `StartSel`/`StopSel` (by default `<b>`/`</b>`). It
 is the source of the highlighted snippets in the UI, and it carries a security caveat that is easy to miss. The manual
@@ -92,7 +102,8 @@ is blunt about it, under a heading titled
 "Cross-site Scripting (XSS) Safety": the output "is not guaranteed to be safe for direct inclusion in web pages", and an
 application should either strip HTML from the input document or run a sanitizer over the output.
 
-This repo takes the first option, in SQL, before `ts_headline` ever runs:
+This repo works on the input side, but escapes instead of strips — stricter than the manual's first option, because
+the text survives verbatim — in SQL, before `ts_headline` ever runs:
 
 ```sql
 ts_headline('english',
@@ -101,15 +112,17 @@ ts_headline('english',
     'StartSel=<mark>,StopSel=</mark>,MaxWords=35,MinWords=15')
 ```
 
-The excerpt is neutralised first, so the only live markup in the result is the `<mark>` this application asked for.
+The excerpt is neutralized first, so the only live markup in the result is the `<mark>` this application asked for.
 
 The frontend is the second layer, and the two divide the work rather than repeating it: the server owns `&`, and
 `sanitizeHeadline.ts` escapes `<` and `>` then restores exactly the two literals `<mark>` and `</mark>`. Escaping `&`
 on both sides would be the obvious-looking choice and is wrong — it renders a server-escaped `Tom &amp; Jerry` as the
-visible text `Tom &amp; Jerry`. The defence still holds if the server step were ever bypassed: only those two exact
+visible text `Tom &amp; Jerry`. The defense still holds if the server step were ever bypassed: only those two exact
 literals come back, so anything carrying an attribute (which needs a space after the tag name) stays inert, and the
-worst a hostile excerpt can produce is a bare, attribute-free `<mark>`. `HeadlineIT` asserts the SQL property on both
-the Criteria and the native path; `sanitizeHeadline.test.ts` asserts the client half.
+worst a hostile excerpt can produce is a bare, attribute-free `<mark>`.
+[`HeadlineIT`](../src/test/java/dev/lukasgrigis/booksearch/search/HeadlineIT.java) asserts the SQL property on both
+the Criteria and the native path;
+[`sanitizeHeadline.test.ts`](../frontend/src/lib/sanitizeHeadline.test.ts) asserts the client half.
 
 Source: [Highlighting results](https://www.postgresql.org/docs/18/textsearch-controls.html#TEXTSEARCH-HEADLINE).
 
@@ -138,12 +151,14 @@ through the same configuration. So listing a pair in both directions is self-can
 first looks. Nothing is mapped back to itself; both sides are swapped to the *other* word. With `sleuth detective`
 and `detective sleuth` both present, the document "the detective solved it" indexes as `sleuth`, and the query
 `sleuth` is rewritten to `detective`. Both moved, and they still never meet: a perfectly symmetric dictionary is a
-no-op that costs you the feature. `GeneratedColumnAndSynonymDirectionIT` proves this directly on that exact pair:
-with both directions present the match fails, with one direction it succeeds.
+no-op that costs you the feature.
+[`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
+proves this directly on that exact pair: with both directions present the match fails, with one direction it succeeds.
 
 It also means a pair only does something if its **target** occurs in the corpus. A pair whose target appears nowhere
-silently matches nothing, which looks identical to the feature being broken. `SynonymDictionaryCorpusIT` fails the build
-if that happens.
+silently matches nothing, which looks identical to the feature being broken.
+[`SynonymDictionaryCorpusIT`](../src/test/java/dev/lukasgrigis/booksearch/search/SynonymDictionaryCorpusIT.java)
+fails the build if that happens.
 
 **Known limitation, not fixed here.** The mapping is `WITH book_synonym, english_stem`, so only the dictionary's exact
 key reaches the synonym dictionary. An inflected form such as `apothecaries`
@@ -172,12 +187,12 @@ choice was not critical."
 A large `k` flattens the difference between the top positions: rank 1 contributes 1/61 = 0.0164 and rank 5 contributes
 1/65 = 0.0154. That damping is the mechanism, not a side effect — it stops one retriever's confident top hit from
 dominating a document that several retrievers agree on. It is also why the UI draws its provenance bars from rank
-position rather than from the contribution term, which barely varies.
+position, not from the contribution term, which barely varies.
 
 Source: Cormack, Clarke & Buettcher, [*Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning
-Methods*](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), SIGIR 2009.
+Methods*](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf), SIGIR 2009.
 
-## Indexes, and what does not scale
+## Indexes: GIN, and where each index stops helping
 
 GIN is the index type for `tsvector`; it stores each lexeme once with a posting list of the rows containing it, which is
 exactly the lookup `@@` performs.
@@ -189,18 +204,22 @@ Two honest caveats about this repo's indexes:
 expression matches it *exactly*, so changing how that expression is built in Java silently drops the index without
 breaking any test.
 
-The other direction is worse, because it changes answers rather than speed. That index stores lexemes produced by the
-synonym dictionary *as it was when the index was built*. Postgres reads a `.syn` file once, at `CREATE TEXT SEARCH
-DICTIONARY` time — so editing `book_synonym.syn` on a live database updates neither the dictionary nor the index.
-Until the dictionary is reloaded and the index REINDEXed, an index scan and a sequential scan of the same table can
-return different rows for the same query, with no error anywhere. Recreating the database is the reliable fix here:
-`mise run infra:down && mise run demo`.
+The other direction is worse, because it changes answers, not speed. That index stores lexemes produced by the
+synonym dictionary *as it was when the index was built* — and a database session reads a `.syn` file **once, the first
+time it uses the dictionary in that session**. Edit `book_synonym.syn` on a live database and any session that already
+used the dictionary keeps the old contents, while a session touching it for the first time sees the new — two
+connections to the same database, disagreeing. The manual's trick for the sessions is a dummy
+`ALTER TEXT SEARCH DICTIONARY book_synonym ( dummy )` — an option removal that is allowed to remove nothing — which
+forces a reload; the index still needs a `REINDEX` on top, because its stored lexemes came from the old dictionary.
+Until both have happened, an index scan and a sequential scan of the same table can return different rows for the same
+query, with no error anywhere. For this demo the blunt reset does both at once: `mise run infra:down && mise run demo`.
 
-**The trigram index is not used by FUZZY.** The predicate is `book.title % :q OR author.name % :q`, and an `OR` spanning
-two tables cannot be answered from either table's index, so the planner scans both — verified at 200k rows with
-`enable_seqscan=off`, where it still refuses the index. The index is kept because it does serve a single-column trigram
-match, which is what most readers adapting this will write. On 77 rows none of this is measurable; at real scale, FUZZY
-is the retriever that needs rethinking first.
+**The trigram index is not used by FUZZY.** The predicate is `book.title % :q OR author.name % :q`, and no single-table
+index can answer an `OR` that spans two tables, so the planner falls back to scanning both. The index is kept because
+it does serve a single-column trigram match, which is what most readers adapting this will write. On 77 rows none of
+this is measurable; at real scale, FUZZY is the retriever that needs rethinking first.
 
 Source: [GIN and GiST index types](https://www.postgresql.org/docs/18/textsearch-indexes.html),
-[GIN internals](https://www.postgresql.org/docs/18/gin.html).
+[GIN internals](https://www.postgresql.org/docs/18/gin.html),
+[Dictionaries](https://www.postgresql.org/docs/18/textsearch-dictionaries.html) (the per-session read and the dummy
+`ALTER` are documented there).

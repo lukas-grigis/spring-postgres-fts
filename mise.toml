@@ -32,7 +32,7 @@ dir = "support"
 run = "docker compose down"
 
 [tasks.app]
-description = "Run the packaged app (needs infra:up first)"
+description = "Run the packaged app (needs infra:up + build first)"
 run = "java -jar target/spring-postgres-fts.jar"
 
 # ─── Checks ──────────────────────────────────────────────────────────

@@ -12,23 +12,24 @@
 <p align="center">
   Lexical, fuzzy and synonym search over Postgres — plus Reciprocal Rank Fusion of all three —
   reached from the JPA Criteria API, dropping to native SQL at exactly one visible place.<br>
-  77 public-domain classics, one endpoint, one page.
+  77 public-domain classics, one search endpoint, one page.
 </p>
-
-Three things this repo established against a live server, each pinned by a test:
-
-- Hibernate renders an **unregistered** `cb.function("ts_rank", …)` straight through as `ts_rank(?, ?)`. Only the `@@`
-  and `%` **operators** need registering — most tutorials register the functions too, and none of it is necessary.
-- **Postgres 18 changed generated columns to `VIRTUAL` by default**, and a virtual column cannot be indexed. Omit
-  `STORED` and you lose the index, not the column — which is a confusing way to find out.
-- A synonym pair listed in **both** directions is self-cancelling. The substitution runs at index time as well as
-  query time, so both sides swap to the other word and still never meet.
 
 <p align="center"><a href="https://lukasgrigis.dev/blog/spring-boot-postgres-full-text-search/"><strong>Read the companion blog post &rarr;</strong></a></p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The demo UI: a FUSED search for &quot;great house&quot;, showing each result's rank in the lexical, fuzzy and synonym retrievers" width="620">
+  <img src="docs/screenshot.png" alt="The demo UI: a FUSED search for &quot;great house&quot;, showing the top result's rank in the lexical, fuzzy and synonym retrievers" width="620">
 </p>
+
+Three things this repo established against a live server, each pinned by a test:
+
+- Hibernate renders an **unregistered** `cb.function("ts_rank", …)` straight through into the SQL — no registration,
+  no validation, Postgres decides. Only the `@@` and `%` **operators** need registering; not `ts_rank`, not
+  `ts_headline`, not `similarity`. Most tutorials register them all, and none of it is necessary.
+- **Postgres 18 changed generated columns to `VIRTUAL` by default**, and a virtual column cannot be indexed. Omit
+  `STORED` and you lose the index, not the column — which is a confusing way to find out.
+- A synonym pair listed in **both** directions is self-cancelling. The substitution runs at index time as well as query
+  time, so both sides swap to the other word and still never meet.
 
 ---
 
@@ -40,7 +41,7 @@ and this repo answers them against real Postgres:
 
 1. **Can Criteria reach `@@`, `ts_rank`, `ts_headline` and `similarity()` at all?** Partly for free, and the split is
    the interesting part. Hibernate renders an unregistered
-   `cb.function("ts_rank", ...)` straight through as `ts_rank(?, ?)`, so plain functions need no setup at all. `@@` and
+   `cb.function("ts_rank", ...)` straight through as `name(args)`, so plain functions need no setup at all. `@@` and
    `%` are operators, with no function-call form for it to fall through to — those need
    `FunctionContributor.registerPattern`, and only those. Most posts that mention Hibernate function registration still
    teach the pre-6.0 `MetadataBuilderContributor` route.
@@ -49,11 +50,60 @@ and this repo answers them against real Postgres:
    `ORDER BY`, which only `CriteriaQuery` exposes. Checked with `javap` against the real jar, not assumed from the docs.
 3. **How far can Criteria carry Reciprocal Rank Fusion before it gives up?** RRF needs three ranked candidate sets,
    `ROW_NUMBER() OVER (...)` and a `FULL OUTER JOIN`. Criteria can express none of them. `BookRepository.findFused` is
-   the one native query here, and that boundary is left visible rather than hidden behind an abstraction.
+   the one native query here, and that boundary stays visible. No abstraction over it.
 
 New to the Postgres side of this? **[docs/POSTGRES-FTS.md](docs/POSTGRES-FTS.md)** explains
 `tsvector`, ranking, `ts_headline`, trigrams, synonym dictionaries and RRF in plain English, with every claim cited to
 the manual.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    UI["React UI<br/>search box · mode toggle · genre filter"]
+    API["SearchController<br/>GET /api/search"]
+
+    subgraph RETRIEVERS["Three retrievers — Criteria Specifications"]
+        LEX["Lexical<br/>tsvector + GIN<br/>websearch_to_tsquery · ts_rank_cd"]:::retriever
+        FUZ["Fuzzy<br/>pg_trgm % operator<br/>threshold 0.2"]:::retriever
+        SYN["Synonym<br/>book_synonym_search config<br/>.syn dictionary"]:::retriever
+    end
+
+    RRF["FUSED — one native query<br/>3 retriever CTEs + ROW_NUMBER()<br/>FULL OUTER JOIN · Σ 1/(60+rank)"]:::fusion
+    DB[("Postgres 18<br/>book · author · genre")]:::store
+    UI -->|" q, mode, genre, page "| API
+    API -->|" one mode per request "| RETRIEVERS
+    API -->|" mode=FUSED "| RRF
+    RETRIEVERS --> DB
+    RRF --> DB
+    classDef retriever fill: #dccfc0, stroke: #5f6e5b, stroke-width: 1.5px, color: #242923
+    classDef fusion fill: #5f6e5b, stroke: #4f5f4c, stroke-width: 1.5px, color: #fdf6ed
+    classDef store fill: #fdf6ed, stroke: #5f675d, stroke-width: 1.5px, color: #242923
+    style RETRIEVERS fill: #fdf6ed, stroke: #5f6e5b, color: #242923
+```
+
+One request, end to end, naming the file at each hop:
+
+1. **`SearchController.search`** binds `q`, `mode`, `genre` and a `Pageable`, rejects a blank query and an unreachable
+   page, and drops any `sort` — relevance ordering is the retriever's.
+2. **`SearchService.search`** branches on the mode, and that branch is the whole architecture.
+3. *Three retrievers* — **`BookSearchExpressions`** supplies the predicate, the rank expression and the headline;
+   `SearchService` assembles them into one `CriteriaQuery` and selects into `SearchResult` with `cb.construct`. The
+   `cb.function("fts", …)` call becomes the SQL `?1 @@ ?2` via **`SearchFunctionContributor`**, which is the only reason
+   `@@` is reachable from Criteria at all.
+4. *Or FUSED* — **`BookRepository.findFused`**, one native query. Rows arrive as the **`FusedSearchRow`** interface
+   projection, and `SearchService.toResult` attaches each retriever's rank.
+5. `PagedModel` on the wire → `api/client.ts` → `useSearch` → `ResultList` / `ResultCard` → `sanitizeHeadline` → the
+   `<mark>`s you see.
+
+The retrievers compose as `Specification<BookEntity>` chains (`hasGenre` joins in via `Specification.and`), and
+`SearchService` builds the `CriteriaQuery` itself instead of going through `JpaSpecificationExecutor`: score and
+headline are computed SQL expressions, not mapped attributes — a Spring Data projection has nothing on the entity to
+read them from, and the `ORDER BY` over the rank needs a `CriteriaQuery` anyway.
+
+Paging is Spring Data's throughout: `Pageable` in, `Page` through the service, `PagedModel` on the wire. The native
+query pages through its own `countQuery`, which is meaningful here because each retriever's candidate set is capped, so
+the fused set is bounded.
 
 ## Quick start
 
@@ -81,7 +131,7 @@ Then try these, which each make one retriever earn its place:
 | Query         | Mode    | Why it is interesting                               |
 |---------------|---------|-----------------------------------------------------|
 | `whale`       | Lexical | ordinary stemmed match                              |
-| `Shakespere`  | Fuzzy   | misspelt; the stemmer cannot reach it, trigrams can |
+| `Shakespere`  | Fuzzy   | misspelled; the stemmer cannot reach it, trigrams can |
 | `casement`    | Synonym | no book contains the word, six are returned anyway  |
 | `great house` | Fused   | see which retriever found what, and at what rank    |
 
@@ -90,7 +140,7 @@ Individual tasks:
 ```bash
 mise run infra:up       # Postgres, host port 5432
 mise run build          # package the app + build the frontend
-mise run app            # java -jar target/spring-postgres-fts.jar
+mise run app            # java -jar target/spring-postgres-fts.jar (needs infra:up + build first)
 mise run frontend:dev   # frontend dev server, proxies /api to :8080
 mise run test           # backend suite (Testcontainers — no infra:up needed)
 mise run frontend:check # frontend lint, format check and unit tests
@@ -98,61 +148,43 @@ mise run check          # probe a RUNNING app: health, all four modes, bad input
 mise run seed           # regenerate the corpus from Project Gutenberg
 ```
 
-`mise run test` and `mise run check` answer different questions. The first runs the retrievers
-against a throwaway container; the second curls the packaged jar over HTTP and asserts every
-example query below still returns a non-empty result set — which is what catches a demo that
-suggests a query the corpus can no longer answer.
+`mise run test` and `mise run check` answer different questions. The first runs the retrievers against a throwaway
+container; the second curls the packaged jar over HTTP and asserts every example query above still returns a non-empty
+result set — which is what catches a demo that suggests a query the corpus can no longer answer.
 
-## Architecture
+## What the tests pin down
 
-```mermaid
-flowchart LR
-    UI["React UI<br/>search box · mode toggle · genre filter"]
-    API["SearchController<br/>GET /api/search"]
+Thirty-six tests against a real Postgres — no mocked database anywhere. The findings worth knowing before you read the
+code:
 
-    subgraph RETRIEVERS["Three retrievers — Criteria Specifications"]
-        direction TB
-        LEX["Lexical<br/>tsvector + GIN · ts_rank_cd<br/>websearch_to_tsquery"]
-        FUZ["Fuzzy<br/>pg_trgm % operator<br/>threshold 0.2"]
-        SYN["Synonym<br/>book_synonym_search config<br/>.syn dictionary"]
-    end
+| Finding                                                                                                                                                                                | Test                                                                                                                                |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| Hibernate renders an unregistered `cb.function` name straight through as `name(args)` and lets Postgres decide — which is why only the `@@` and `%` *operators* need `registerPattern` | [`FunctionContributorIT`](src/test/java/dev/lukasgrigis/booksearch/search/hibernate/FunctionContributorIT.java)                     |
+| A synonym pair listed in **both** directions is self-cancelling: the substitution runs at index time as well as query time                                                             | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
+| Postgres 18 made generated columns `VIRTUAL` by default, and a virtual column cannot carry an index                                                                                    | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
+| `ts_headline` does not escape its input, so the excerpt is escaped *before* it runs                                                                                                    | [`HeadlineIT`](src/test/java/dev/lukasgrigis/booksearch/search/HeadlineIT.java)                                                     |
+| RRF surfaces a book that is #1 in no single retriever                                                                                                                                  | [`FusedRankingIT`](src/test/java/dev/lukasgrigis/booksearch/search/FusedRankingIT.java)                                             |
+| Every shipped synonym pair reaches a real seeded book — a pair whose target is missing matches nothing and looks identical to a broken feature                                         | [`SynonymDictionaryCorpusIT`](src/test/java/dev/lukasgrigis/booksearch/search/SynonymDictionaryCorpusIT.java)                       |
+| `ts_rank` and `ts_rank_cd` genuinely disagree on this corpus                                                                                                                           | [`RankOrderingIT`](src/test/java/dev/lukasgrigis/booksearch/search/RankOrderingIT.java)                                             |
+| A trigram match finds a misspelled author the stemmer structurally cannot                                                                                                              | [`FuzzySearchIT`](src/test/java/dev/lukasgrigis/booksearch/search/FuzzySearchIT.java)                                               |
 
-    DB[("Postgres 18<br/>book · author · genre")]
-    RRF["FUSED — one native query<br/>3 CTEs + ROW_NUMBER()<br/>FULL OUTER JOIN · Σ 1/(60+rank)"]
+Everything asserting Postgres behavior runs in a `@DataJpaTest` slice against a real container; only the HTTP contract
+needs `@SpringBootTest`, over MockMvc, not a servlet container. There is no mocked database anywhere, so **Docker is
+required even for `mise run test`** — one container starts per JVM and `book_synonym.syn` is copied into it before
+Liquibase creates the dictionary.
 
-    UI -->|"q, mode, genre, page"| API
-    API -->|"LEXICAL / FUZZY / SYNONYM"| LEX & FUZ & SYN
-    LEX --> DB
-    FUZ --> DB
-    SYN --> DB
-    API -->|"mode=FUSED"| RRF
-    RRF --> DB
-    DB -->|"ranked rows + per-retriever<br/>rank contributions"| API
-    API --> UI
+## The corpus
 
-    classDef retriever fill:#dccfc0,stroke:#5f6e5b,stroke-width:1.5px,color:#242923
-    classDef fusion fill:#5f6e5b,stroke:#4f5f4c,stroke-width:1.5px,color:#fdf6ed
-    classDef store fill:#fdf6ed,stroke:#5f675d,stroke-width:1.5px,color:#242923
-    class LEX,FUZ,SYN retriever
-    class RRF fusion
-    class DB store
-```
+77 public-domain English classics, pulled from Project Gutenberg by a committed script and curated so the demos are
+honest: typo-prone author names for the trigram retriever, prose long enough that `ts_rank` and `ts_rank_cd` genuinely
+disagree, and vocabulary the synonym dictionary can actually reach. Excerpts are real work text, verified against the
+Gutendex API, and a work that fails verification is dropped rather than guessed at.
+The script is [`support/seed/fetch_seed.py`](support/seed/fetch_seed.py); the provenance rules are
+in [`support/seed/README.md`](support/seed/README.md).
 
-One request, end to end, naming the file at each hop:
+Genres are whatever the corpus produced; the frontend fetches them from `GET /api/genres`, so the list cannot drift.
 
-1. **`SearchController.search`** binds `q`, `mode`, `genre` and a `Pageable`, rejects a blank query and an unreachable
-   page, and drops any `sort` — relevance ordering is the retriever's.
-2. **`SearchService.search`** branches on the mode, and that branch is the whole architecture.
-3. *Three retrievers* — **`BookSearchExpressions`** supplies the predicate, the rank expression and the headline;
-   `SearchService` assembles them into one `CriteriaQuery` and selects into `SearchResult` with `cb.construct`. The
-   `cb.function("fts", …)` call becomes the SQL `?1 @@ ?2` via **`SearchFunctionContributor`**, which is the only
-   reason `@@` is reachable from Criteria at all.
-4. *Or FUSED* — **`BookRepository.findFused`**, one native query. Rows arrive as the **`FusedSearchRow`** interface
-   projection, and `SearchService.toResult` attaches each retriever's rank.
-5. `PagedModel` on the wire → `api/client.ts` → `useSearch` → `ResultList` / `ResultCard` → `sanitizeHeadline` → the
-   `<mark>`s you see.
-
-The package layout follows that boundary:
+## Project structure
 
 ```
 dev.lukasgrigis.booksearch
@@ -166,54 +198,21 @@ Dependencies run one way, `web → search → domain`. `SearchFunctionContributo
 application code: it is loaded by `META-INF/services` before the Spring context exists, and it is the piece most readers
 come here for.
 
-Three retrievers run as three `Specification<BookEntity>` chains, composed with `hasGenre` via
-`Specification.and`, selected into `SearchResult` with `cb.construct`. `SearchService` builds that
-`CriteriaQuery` itself rather than going through `JpaSpecificationExecutor`, because score and headline are computed SQL
-expressions rather than mapped attributes — a Spring Data projection has nothing on the entity to read them from, and
-the `ORDER BY` over the rank needs a `CriteriaQuery`
-anyway. `mode=FUSED` skips all three and calls the native RRF query.
+## Tech stack
 
-Paging is Spring Data's throughout: `Pageable` in, `Page` through the service, `PagedModel` on the wire. The native
-query pages through its own `countQuery`, which is meaningful here because each retriever's candidate set is capped, so
-the fused set is bounded.
-
-## What the tests pin down
-
-Thirty-six tests against a real Postgres — no mocked database anywhere. The findings worth knowing before you read the
-code:
-
-| Finding                                                                                                                                                                                               | Test                                                                                                                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| Hibernate renders an **unregistered** `cb.function` name straight through as `name(args)`, so only the `@@` and `%` *operators* need `registerPattern` — not `ts_rank`, `ts_headline` or `similarity` | [`FunctionContributorIT`](src/test/java/dev/lukasgrigis/booksearch/search/hibernate/FunctionContributorIT.java)                     |
-| A synonym pair listed in **both** directions is self-cancelling: the substitution runs at index time as well as query time                                                                            | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
-| Postgres 18 made generated columns `VIRTUAL` by default, and a virtual column cannot carry an index                                                                                                   | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
-| `ts_headline` does not escape its input, so the excerpt is escaped *before* it runs                                                                                                                   | [`HeadlineIT`](src/test/java/dev/lukasgrigis/booksearch/search/HeadlineIT.java)                                                     |
-| RRF surfaces a book that is #1 in no single retriever                                                                                                                                                 | [`FusedRankingIT`](src/test/java/dev/lukasgrigis/booksearch/search/FusedRankingIT.java)                                             |
-| Every shipped synonym pair reaches a real seeded book — a pair whose target is missing matches nothing and looks identical to a broken feature                                                        | [`SynonymDictionaryCorpusIT`](src/test/java/dev/lukasgrigis/booksearch/search/SynonymDictionaryCorpusIT.java)                       |
-| `ts_rank` and `ts_rank_cd` genuinely disagree on this corpus                                                                                                                                          | [`RankOrderingIT`](src/test/java/dev/lukasgrigis/booksearch/search/RankOrderingIT.java)                                             |
-| A trigram match finds a misspelled author the stemmer structurally cannot                                                                                                                             | [`FuzzySearchIT`](src/test/java/dev/lukasgrigis/booksearch/search/FuzzySearchIT.java)                                               |
-
-Everything asserting Postgres behaviour runs in a `@DataJpaTest` slice against a real container; only the HTTP contract
-needs `@SpringBootTest`, over MockMvc rather than a servlet container. There is no mocked database anywhere, so **Docker
-is required even for `mise run test`** — one container starts per JVM and `book_synonym.syn` is copied into it before
-Liquibase creates the dictionary.
-
-## The corpus
-
-77 public-domain English classics, pulled from Project Gutenberg by a committed script ([
-`support/seed/fetch_seed.py`](support/seed/fetch_seed.py)) and curated so the demos are honest:
-typo-prone author names for the trigram retriever, prose long enough that `ts_rank` and
-`ts_rank_cd` genuinely disagree, and vocabulary the synonym dictionary can actually reach. Excerpts are real work text,
-verified against the Gutendex API, and a work that fails verification is dropped rather than guessed at. The provenance
-rules are in
-[`support/seed/README.md`](support/seed/README.md).
-
-Genres are whatever the corpus produced; the frontend fetches them from `GET /api/genres` rather than hardcoding a list
-that can drift.
+| Layer             | What's running                                                                   |
+|-------------------|----------------------------------------------------------------------------------|
+| App               | Spring Boot 4.1.0, Spring Data JPA 4.1, Hibernate ORM 7.4.1                      |
+| Search            | PostgreSQL 18 (`postgres:18-trixie`) — `tsvector`, `pg_trgm`, synonym dictionary |
+| Migrations        | Liquibase (`spring-boot-starter-liquibase`)                                      |
+| Tests             | Testcontainers against real Postgres, MockMvc for the HTTP contract              |
+| Frontend          | React 19, Vite, Tailwind CSS 4, TypeScript 5.9                                   |
+| Corpus            | Project Gutenberg via [`support/seed/fetch_seed.py`](support/seed/fetch_seed.py) |
+| Tasks / toolchain | mise (Java 25, Maven 3.9.12, Node 26, Python 3.14 pinned in `mise.toml`)         |
 
 ## Limits
 
-Where this approach ends, stated so nobody discovers it in production:
+Where this approach ends:
 
 - **This is not BM25.** `ts_rank` and `ts_rank_cd` score a row from that row's `tsvector` alone. Postgres FTS keeps **no
   corpus-wide statistics**, so there is no inverse-document-frequency term:
@@ -225,11 +224,23 @@ Where this approach ends, stated so nobody discovers it in production:
 - **The synonym dictionary is not inflection-aware.** `apothecaries` misses an `apothecary` key, so SYNONYM is not a
   superset of LEXICAL. The `thesaurus` template is the documented fix and is deliberately not implemented —
   see [docs/POSTGRES-FTS.md](docs/POSTGRES-FTS.md).
-- **Sorting is not yours to choose.** The endpoint takes a `Pageable`, so Spring binds a `sort` parameter whether or
-  not this API wants one. `SearchController` drops it explicitly rather than passing it on: relevance ordering belongs
-  to the retriever, and FUSED is a native query, where Spring Data would splice an unparsed sort into the SQL text.
+- **The endpoint is unauthenticated and rate-unlimited.** It is a demo — and a ranking query is not a cheap thing to
+  leave open. Put auth and a limit in front before this shape faces anything public.
+- **Sorting is not yours to choose.** The endpoint takes a `Pageable`, so Spring binds a `sort` parameter whether or not
+  this API wants one. `SearchController` drops it explicitly: relevance ordering belongs to the retriever, and FUSED is
+  a native query, where Spring Data would splice an unparsed sort into the SQL text.
 - **There is no production serving story for the frontend.** `frontend:build` is a typecheck-and-bundle gate; the demo
   serves through the Vite dev server, and its `/api` proxy is standing in for a CORS decision nobody has had to make.
+
+## Contributing
+
+If you find a bug or have an idea, open an issue or send a pull request.
+
+1. Fork the repo
+2. Create a branch (`git checkout -b my-change`)
+3. Make your changes
+4. Run `mise run test` and `mise run frontend:check` to make sure things work
+5. Open a PR
 
 ## License
 

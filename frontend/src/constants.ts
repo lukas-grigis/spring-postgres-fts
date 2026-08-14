@@ -29,7 +29,7 @@ export const MODE_DESCRIPTIONS: Record<SearchMode, string> = {
  */
 export const EXAMPLE_QUERIES: ReadonlyArray<{ q: string; mode: SearchMode; hint: string }> = [
   { q: 'whale', mode: 'LEXICAL', hint: 'plain word match' },
-  { q: 'Shakespere', mode: 'FUZZY', hint: 'misspelt on purpose' },
+  { q: 'Shakespere', mode: 'FUZZY', hint: 'misspelled on purpose' },
   { q: 'casement', mode: 'SYNONYM', hint: 'no book says it' },
   { q: 'great house', mode: 'FUSED', hint: 'all three, blended' },
 ];

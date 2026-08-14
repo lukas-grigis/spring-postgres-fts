@@ -47,10 +47,11 @@ class HeadlineIT extends AbstractPersistenceTest {
     /**
      * Claim: {@code ts_headline} does not escape the source text, so {@link
      * BookSearchExpressions#escapedExcerpt} and the equivalent {@code replace(replace(replace(...)))}
-     * chain in {@link BookRepository#findFused} must both neutralise HTML metacharacters before
+     * chain in {@link BookRepository#findFused} must both neutralize HTML metacharacters before
      * {@code ts_headline} ever sees them — otherwise a hostile excerpt is live markup in the
      * response. Exercised through both retrieval paths since the escaping is duplicated in two
-     * places (see docs/POSTGRES-FTS.md, "ts_headline does not escape").
+     * places (see docs/POSTGRES-FTS.md, "Highlighting: ts_headline does not escape — so the
+     * input is escaped first").
      */
     @Test
     void headlineEscapesHtmlMetacharactersInBothRetrievalPaths() {

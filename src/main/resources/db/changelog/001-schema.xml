@@ -101,12 +101,11 @@
         The GIN index on search_vector earns its keep: @@ against it is an index scan at any size.
 
         The trigram index is honest about being partial. FUZZY's predicate is
-        `book.title % :q OR author.name % :q`, and an OR spanning two tables cannot be answered
-        from either table's index, so the planner scans both regardless — verified at 200k rows
-        with enable_seqscan=off, where it still refuses the index. Do not delete it on that basis:
-        it does serve a title-only trigram match, which is what a reader adapting this to a
-        single-column search will write. See docs/POSTGRES-FTS.md, "Indexes, and what does not
-        scale".
+        `book.title % :q OR author.name % :q`, and no single-table index can answer an OR that
+        spans two tables, so the planner falls back to scanning both.
+        Do not delete it on that basis: it does serve a title-only trigram match, which is what a
+        reader adapting this to a single-column search will write. See docs/POSTGRES-FTS.md,
+        "Indexes: GIN, and where each index stops helping".
     -->
     <changeSet id="007-book-indexes" author="spring-postgres-fts">
         <comment>GIN on the tsvector; trigram index on title only — FUZZY's cross-table OR cannot use it.</comment>
@@ -128,11 +127,12 @@
         a thesaurus dictionary; it is deliberately not implemented, because the synonym template is
         what makes the index-time/query-time symmetry visible, and that is the point being shown.
 
-        EDITING THE .syn FILE LATER: the dictionary is read once, at CREATE time. Changing the file
-        afterwards requires ALTER TEXT SEARCH DICTIONARY (or a reconnect) to reload it, and any
-        expression index built on this configuration — idx_book_synonym_vector, changeset 009 —
-        holds lexemes from the OLD mapping until it is REINDEXed. The index and the query then
-        disagree silently, with no error and no failing test.
+        EDITING THE .syn FILE LATER: each session reads the file once, the first time it uses the
+        dictionary — so after an edit, sessions that already used it keep the old mapping while
+        fresh ones see the new. ALTER TEXT SEARCH DICTIONARY forces existing sessions to reload,
+        and any expression index built on this configuration — idx_book_synonym_vector, changeset
+        009 — holds lexemes from the OLD mapping until it is REINDEXed. The index and the query
+        then disagree silently, with no error and no failing test.
     -->
     <changeSet id="008-synonym-dictionary" author="spring-postgres-fts">
         <comment>Synonym dictionary + book_synonym_search config; needs book_synonym.syn on the server.</comment>
