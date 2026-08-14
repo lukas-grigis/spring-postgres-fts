@@ -7,7 +7,7 @@ paper it paraphrases, and the behavioral claims were checked against a real
 `postgres:18-trixie` container by the integration tests named alongside them.
 
 None of it is new, either. Full-text search has been in core Postgres
-since [8.3](https://www.postgresql.org/docs/release/8-3/), and `pg_trgm` is older still — Postgres 18 and Spring Boot
+since [8.3](https://www.postgresql.org/docs/release/8.3.0/), and `pg_trgm` is older still — Postgres 18 and Spring Boot
 4.1 are what this repo was built and verified on, not what makes any of it work.
 
 ## The three types
