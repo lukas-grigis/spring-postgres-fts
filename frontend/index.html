@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Book Search — Postgres Full-Text Search Demo</title>
+    <meta
+      name="description"
+      content="Lexical, fuzzy and synonym search over a public-domain book catalogue, fused with Reciprocal Rank Fusion."
+    />
+    <!--
+      Runs before first paint so a dark-mode reader never sees a white flash. Inline on purpose:
+      a module script would run after the first frame. try/catch because localStorage throws
+      outright in Safari with cookies blocked, which would otherwise take the whole page down.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* storage unavailable — fall back to the light default */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/src/main.tsx" type="module"></script>
+  </body>
+</html>

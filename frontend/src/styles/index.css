@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Seven steps: six in use, plus `sm` aliased onto `xs` so a stray text-sm cannot land
+     off-scale. Line-height and tracking travel with the size. */
+  --text-2xs: 0.6875rem; /* 11px — uppercase micro-caps */
+  --text-2xs--line-height: 1.45;
+  --text-2xs--letter-spacing: 0.06em;
+  --text-xs: 0.8125rem; /* 13px — secondary */
+  --text-xs--line-height: 1.5;
+  --text-xs--letter-spacing: 0em;
+  --text-sm: 0.8125rem; /* alias of xs, so a stray text-sm cannot land off-scale */
+  --text-sm--line-height: 1.5;
+  --text-sm--letter-spacing: 0em;
+  --text-base: 0.9375rem; /* 15px — body */
+  --text-base--line-height: 1.55;
+  --text-base--letter-spacing: -0.006em;
+  --text-lg: 1.0625rem; /* 17px — result title */
+  --text-lg--line-height: 1.35;
+  --text-lg--letter-spacing: -0.011em;
+  --text-xl: 1.1875rem; /* 19px — the search field, the primary object on this page */
+  --text-xl--line-height: 1.3;
+  --text-xl--letter-spacing: -0.014em;
+  --text-2xl: 1.75rem; /* 28px — h1, deliberately modest next to the field */
+  --text-2xl--line-height: 1.15;
+  --text-2xl--letter-spacing: -0.024em;
+
+  /*
+       * Sage on cream. Every ratio below is measured, not estimated.
+       *
+       * The source palette's sage (#778873) measures 3.53:1 on this cream — fine for a bar or a
+       * border, short of AA's 4.5 for text. So the accent role is a darker step of the same hue
+       * (5.06:1) and #778873 survives as the mid-tone the rules and bars are drawn from.
+       */
+  --color-bg: #fdf6ed; /* cream from the palette */
+  --color-surface: #ffffff;
+  --color-rule: #e6dccd;
+  --color-rule-strong: #dccfc0; /* beige from the palette */
+  --color-fg: #242923; /* 13.82 on bg */
+  --color-fg-muted: #5f675d; /* 5.46 */
+  --color-accent: #5f6e5b; /* 5.06, and cream on it is the same 5.06 */
+  --color-accent-on: #fdf6ed;
+  --color-mark: #dccfc0; /* ink on it: 9.69 */
+  --color-danger: #8f2b22; /* 7.72 */
+  --radius-sm: 2px;
+}
+
+/*
+ * Dark inverts the relationship rather than dimming it: the palette's light sage (#A1BC98)
+ * becomes the accent at 8.24:1, where the darker light-mode sage would have failed.
+ */
+html.dark {
+  --color-bg: #1a1d19;
+  --color-surface: #232720;
+  --color-rule: #2f342d;
+  --color-rule-strong: #454b42;
+  --color-fg: #fdf6ed; /* 15.87 */
+  --color-fg-muted: #9aa396; /* 6.53 */
+  --color-accent: #a1bc98; /* 8.24, and bg on it is the same 8.24 */
+  --color-accent-on: #1a1d19;
+  --color-mark: #3f5040; /* cream on it: 8.05 */
+  --color-danger: #e89189; /* 7.17 */
+}
+
+/* Makes the native select, the scrollbars and the type=search clear button render correctly. */
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}
+
+/*
+ * box-decoration-break keeps a highlight that wraps across a line as one continuous mark; the
+ * negative margin cancels the padding so highlighting a word does not nudge the text around it.
+ */
+mark {
+  background: var(--color-mark);
+  color: inherit;
+  border-radius: 0;
+  padding: 0.05em 0.15em;
+  margin: 0 -0.05em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-on);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
