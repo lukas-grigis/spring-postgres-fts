@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: booksearch
+      POSTGRES_PASSWORD: booksearch
+      POSTGRES_DB: booksearch
+    ports:
+      # Standard PostgreSQL port. Free 5432 before `mise run infra:up` — a clash
+      # fails `docker compose up`, or the app silently targets the wrong database.
+      - "5432:5432"
+    volumes:
+      # Mount the ONE file, not the whole tsearch_data directory: a directory-level bind mount
+      # replaces the image's entire tsearch_data, shadowing the built-in english.stop and other
+      # default dictionary files that the plain `english` config itself depends on — reproduced
+      # live: `to_tsvector('english', ...)` failed with "could not open stop-word file
+      # .../english.stop: No such file or directory" once the directory was mounted whole.
+      - ./tsearch_data/book_synonym.syn:/usr/share/postgresql/18/tsearch_data/book_synonym.syn:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U booksearch -d booksearch" ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s

@@ -1,0 +1,197 @@
+[tools]
+java = "25"
+maven = "3.9.12"
+node = "26"
+python = "3.14"
+
+# ─── Build ───────────────────────────────────────────────────────────
+
+[tasks.build]
+description = "Package the app (tests skipped) and build the frontend — the one-button path fails if either does"
+depends = ["frontend:build"]
+run = "mvn -B -ntp -DskipTests package"
+
+[tasks.test]
+description = "Run the test suite (Testcontainers spins up its own Postgres — no infra:up needed)"
+run = "mvn -B -ntp test"
+
+[tasks.seed]
+description = "Regenerate the Liquibase seed changelog from Project Gutenberg (offline-safe once committed)"
+run = "python3 support/seed/fetch_seed.py"
+
+# ─── Infra ───────────────────────────────────────────────────────────
+
+[tasks."infra:up"]
+description = "Start Postgres (host port 5432, waits for healthy)"
+dir = "support"
+run = "docker compose up -d --wait"
+
+[tasks."infra:down"]
+description = "Stop Postgres"
+dir = "support"
+run = "docker compose down"
+
+[tasks.app]
+description = "Run the packaged app (needs infra:up first)"
+run = "java -jar target/spring-postgres-fts.jar"
+
+# ─── Checks ──────────────────────────────────────────────────────────
+
+[tasks.check]
+description = "Probe a running app: health, all four modes return real hits, and bad input is rejected"
+quiet = true
+run = '''
+#!/usr/bin/env bash
+set -uo pipefail
+APP="http://localhost:8080"
+FAILED=0
+ok(){ echo "  [ OK ] $1"; }
+no(){ echo "  [FAIL] $1"; FAILED=1; }
+
+echo "======================================================================"
+echo "  spring-postgres-fts — checks"
+echo "======================================================================"
+
+curl -s --max-time 5 "$APP/actuator/health" 2>/dev/null | grep -q '"status":"UP"' \
+  && ok "app health UP" || no "app not UP (start it: mise run demo)"
+
+# Each probe asserts a NON-EMPTY result set, not merely a response body: an error payload is
+# also a body, and the old check passed on one. Queries match the UI's example chips, so this
+# fails if the demo ever suggests something the corpus cannot answer.
+probe() {
+  local q="$1" mode="$2"
+  local n
+  n="$(curl -s --max-time 5 --get --data-urlencode "q=$q" "$APP/api/search?mode=$mode" 2>/dev/null \
+        | grep -o '"id"' | wc -l | tr -d ' ')"
+  [ "${n:-0}" -gt 0 ] && ok "mode=$mode '$q' -> $n hits" || no "mode=$mode '$q' returned nothing"
+}
+probe whale LEXICAL
+probe Shakespere FUZZY
+probe casement SYNONYM
+probe "great house" FUSED
+
+# Bad input must be a 400, not a 500. page*size used to overflow to a negative offset.
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$APP/api/search?q=time&page=300000000")"
+[ "$code" = "400" ] && ok "oversized page rejected with 400" || no "oversized page returned $code, expected 400"
+
+echo "======================================================================"
+[ "$FAILED" -eq 0 ] && echo "  all checks passed" || echo "  CHECKS FAILED"
+exit "$FAILED"
+'''
+
+# ─── Demo (one-button reproduction) ──────────────────────────────────
+
+[tasks.demo]
+description = "One command: infra up, build, run the app, serve the frontend. Ctrl+C to stop."
+depends = ["build", "infra:up"]
+quiet = true
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(pwd)"
+JAR="$ROOT/target/spring-postgres-fts.jar"
+APP_PID=""
+FRONTEND_PID=""
+cleanup() {
+  # Children first: `npm run dev` forks vite, and killing only the parent leaves vite holding
+  # :5173 — the exact orphan the preflight below then refuses to start against.
+  for pid in "$FRONTEND_PID" "$APP_PID"; do
+    [ -n "$pid" ] || continue
+    pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  (cd "$ROOT/support" && docker compose down) 2>/dev/null || true
+  echo "==> Stopped."
+}
+trap cleanup INT TERM EXIT
+mkdir -p "$ROOT/.logs"
+
+# Preflight. Without this, a stale listener on :8080 makes the app die on startup while the
+# readiness loop below keeps polling that other process forever.
+for port in 8080 5173; do
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "!! port $port is already in use — stop that process first:" >&2
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >&2
+    exit 1
+  fi
+done
+
+echo "==> starting app..."
+java -jar "$JAR" > "$ROOT/.logs/app.log" 2>&1 &
+APP_PID=$!
+echo "        waiting for readiness (:8080/actuator/health)..."
+# Bounded, and it gives up the moment the app process is gone: a dead app must fail loudly with
+# its own log, never hang.
+UP=""
+for _ in $(seq 1 60); do
+  if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "!! app exited during startup — last 30 log lines:" >&2
+    tail -30 "$ROOT/.logs/app.log" >&2
+    exit 1
+  fi
+  if curl -sf http://localhost:8080/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then UP=1; break; fi
+  sleep 1
+done
+if [ -z "$UP" ]; then
+  echo "!! app did not report UP within 60s — last 30 log lines:" >&2
+  tail -30 "$ROOT/.logs/app.log" >&2
+  exit 1
+fi
+echo "        app is up: http://localhost:8080/swagger-ui.html"
+
+echo "==> installing frontend deps..."
+(cd "$ROOT/frontend" && npm install --silent)
+
+echo "==> starting frontend dev server..."
+npm --prefix "$ROOT/frontend" run dev > "$ROOT/.logs/frontend.log" 2>&1 &
+FRONTEND_PID=$!
+echo "        waiting for readiness (:5173)..."
+SERVED=""
+for _ in $(seq 1 60); do
+  if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    echo "!! frontend dev server exited — last 30 log lines:" >&2
+    tail -30 "$ROOT/.logs/frontend.log" >&2
+    exit 1
+  fi
+  if curl -sf http://localhost:5173 >/dev/null 2>&1; then SERVED=1; break; fi
+  sleep 1
+done
+[ -n "$SERVED" ] || { echo "!! frontend not serving within 60s:" >&2; tail -30 "$ROOT/.logs/frontend.log" >&2; exit 1; }
+
+echo ""
+echo "==> Demo is running!"
+echo "    Frontend:    http://localhost:5173"
+echo "    Swagger UI:  http://localhost:8080/swagger-ui.html"
+echo "    Logs:        tail -f .logs/{app,frontend}.log"
+echo ""
+echo "    Press Ctrl+C to stop everything"
+wait
+'''
+
+# ─── Frontend ──────────────────────────────────────────────────────
+
+[tasks."frontend:install"]
+description = "Install frontend dependencies"
+dir = "frontend"
+run = "npm install"
+
+[tasks."frontend:dev"]
+description = "Start the frontend dev server (port 5173, expects the backend on :8080)"
+dir = "frontend"
+run = "npm run dev"
+
+[tasks."frontend:build"]
+description = "Typecheck and bundle the frontend — a build gate; the demo serves via the Vite dev server"
+dir = "frontend"
+run = "npm ci && npm run build"
+
+[tasks."frontend:test"]
+description = "Run the frontend unit tests"
+dir = "frontend"
+run = "npm run test"
+
+[tasks."frontend:check"]
+description = "Lint, format-check and unit-test the frontend"
+dir = "frontend"
+run = "npm run lint && npm run format:check && npm run test"
