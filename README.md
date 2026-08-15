@@ -142,11 +142,19 @@ mise run infra:up       # Postgres, host port 5432
 mise run build          # package the app + build the frontend
 mise run app            # java -jar target/spring-postgres-fts.jar (needs infra:up + build first)
 mise run frontend:dev   # frontend dev server, proxies /api to :8080
+mise run sql            # every retriever in plain SQL, no app involved (support/demo.sql)
 mise run test           # backend suite (Testcontainers — no infra:up needed)
 mise run frontend:check # frontend lint, format check and unit tests
 mise run check          # probe a RUNNING app: health, all four modes, bad input
 mise run seed           # regenerate the corpus from Project Gutenberg
 ```
+
+`mise run sql` is the shortest path to seeing what this repo is actually about. It runs
+[`support/demo.sql`](support/demo.sql) against the seeded database with `psql -e`, so each statement
+is echoed above its own result: the lexical match ranked by `ts_rank_cd`, `ts_rank` and `ts_rank_cd`
+disagreeing on the same eleven rows, the stemmer returning nothing for `Stevensen` while trigrams
+return three books, and `casement` returning six books that do not contain the word. No application
+runs at any point.
 
 `mise run test` and `mise run check` answer different questions. The first runs the retrievers against a throwaway
 container; the second curls the packaged jar over HTTP and asserts every example query above still returns a non-empty

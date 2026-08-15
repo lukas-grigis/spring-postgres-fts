@@ -35,6 +35,11 @@ run = "docker compose down"
 description = "Run the packaged app (needs infra:up + build first)"
 run = "java -jar target/spring-postgres-fts.jar"
 
+[tasks.sql]
+description = "Every retriever in plain SQL against the seeded database, no application involved"
+dir = "support"
+run = "docker compose exec -T db psql -U booksearch -d booksearch -e -f - < demo.sql"
+
 # ─── Checks ──────────────────────────────────────────────────────────
 
 [tasks.check]

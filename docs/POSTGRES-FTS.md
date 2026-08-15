@@ -223,3 +223,29 @@ Source: [GIN and GiST index types](https://www.postgresql.org/docs/18/textsearch
 [GIN internals](https://www.postgresql.org/docs/18/gin.html),
 [Dictionaries](https://www.postgresql.org/docs/18/textsearch-dictionaries.html) (the per-session read and the dummy
 `ALTER` are documented there).
+
+## Appendix: why `PredicateSpecification` cannot rank
+
+Spring Data JPA 4 ships `PredicateSpecification` alongside the classic `Specification`, and it does
+not replace it for ranked search. The reason is in the signature, not in the docs: `toPredicate`
+never receives the `CriteriaQuery`, and `ORDER BY` lives on the `CriteriaQuery`. Ranking is an
+`ORDER BY`, so the newer interface structurally cannot express one.
+
+Checked against the real jar rather than assumed, with static and default members elided:
+
+```
+$ javap -cp spring-data-jpa-4.1.0.jar \
+    org.springframework.data.jpa.domain.PredicateSpecification
+Compiled from "PredicateSpecification.java"
+  ...
+  public abstract jakarta.persistence.criteria.Predicate toPredicate(jakarta.persistence.criteria.From<?, T>, jakarta.persistence.criteria.CriteriaBuilder);
+
+$ javap -cp spring-data-jpa-4.1.0.jar \
+    org.springframework.data.jpa.domain.Specification
+Compiled from "Specification.java"
+  ...
+  public abstract jakarta.persistence.criteria.Predicate toPredicate(jakarta.persistence.criteria.Root<T>, jakarta.persistence.criteria.CriteriaQuery<?>, jakarta.persistence.criteria.CriteriaBuilder);
+```
+
+Two arguments versus three. `SearchService` therefore builds its `CriteriaQuery` around the classic
+three-argument `Specification`.
