@@ -185,9 +185,9 @@ Liquibase creates the dictionary.
 77 public-domain English classics, pulled from Project Gutenberg by a committed script and curated so the demos are
 honest: typo-prone author names for the trigram retriever, prose long enough that `ts_rank` and `ts_rank_cd` genuinely
 disagree, and vocabulary the synonym dictionary can actually reach. Excerpts are real work text, verified against the
-Gutendex API, and a work that fails verification is dropped rather than guessed at. The script is [
-`support/seed/fetch_seed.py`](support/seed/fetch_seed.py); the provenance rules are in [
-`support/seed/README.md`](support/seed/README.md).
+Gutendex API, and a work that fails verification is dropped rather than guessed at. The script is
+[`support/seed/fetch_seed.py`](support/seed/fetch_seed.py); the provenance rules are in
+[`support/seed/README.md`](support/seed/README.md).
 
 Genres are whatever the corpus produced; the frontend fetches them from `GET /api/genres`, so the list cannot drift.
 

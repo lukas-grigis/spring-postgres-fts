@@ -33,11 +33,10 @@ Computing `to_tsvector(...)` on every query means re-parsing every document on e
 generated column, which Postgres recomputes only when the source columns change (`001-schema.xml`, changeset 006):
 
 ```sql
-ALTER TABLE book
-    ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (
-        SETWEIGHT(TO_TSVECTOR('english', COALESCE(title, '')), 'A') ||
-        SETWEIGHT(TO_TSVECTOR('english', COALESCE(excerpt, '')), 'B')
-        ) STORED;
+ALTER TABLE book ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(excerpt, '')), 'B')
+) STORED;
 ```
 
 Two things are load-bearing.
@@ -49,8 +48,7 @@ title match outranks an excerpt match without any application code.
 `VIRTUAL`**, and a virtual column cannot be indexed — `CREATE INDEX ... USING GIN (search_vector)`
 on one fails with `indexes on virtual generated columns are not supported`. Omitting the keyword on Postgres 18
 therefore breaks the index, not the column.
-[
-`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
+[`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
 asserts this against a live server.
 
 Source: [Generated columns](https://www.postgresql.org/docs/18/ddl-generated-columns.html) — which documents the
@@ -108,9 +106,8 @@ This repo works on the input side, but escapes instead of strips — stricter th
 text survives verbatim — in SQL, before `ts_headline` ever runs:
 
 ```sql
-ts_headline
-('english',
-    REPLACE (REPLACE (REPLACE (b.excerpt, '&', '&amp;'), '<', '&lt;'), '>', '&gt;'),
+ts_headline('english',
+    replace(replace(replace(b.excerpt, '&', '&amp;'), '<', '&lt;'), '>', '&gt;'),
     websearch_to_tsquery('english', :q),
     'StartSel=<mark>,StopSel=</mark>,MaxWords=35,MinWords=15')
 ```
@@ -155,8 +152,7 @@ looks. Nothing is mapped back to itself; both sides are swapped to the _other_ w
 and `detective sleuth` both present, the document "the detective solved it" indexes as `sleuth`, and the query
 `sleuth` is rewritten to `detective`. Both moved, and they still never meet: a perfectly symmetric dictionary is a no-op
 that costs you the feature.
-[
-`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
+[`GeneratedColumnAndSynonymDirectionIT`](../src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java)
 proves this directly on that exact pair: with both directions present the match fails, with one direction it succeeds.
 
 It also means a pair only does something if its **target** occurs in the corpus. A pair whose target appears nowhere
