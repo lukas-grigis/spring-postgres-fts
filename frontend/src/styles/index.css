@@ -5,7 +5,7 @@
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
 
   /* Seven steps: six in use, plus `sm` aliased onto `xs` so a stray text-sm cannot land
-     off-scale. Line-height and tracking travel with the size. */
+       off-scale. Line-height and tracking travel with the size. */
   --text-2xs: 0.6875rem; /* 11px — uppercase micro-caps */
   --text-2xs--line-height: 1.45;
   --text-2xs--letter-spacing: 0.06em;
@@ -29,12 +29,12 @@
   --text-2xl--letter-spacing: -0.024em;
 
   /*
-       * Sage on cream. Every ratio below is measured, not estimated.
-       *
-       * The source palette's sage (#778873) measures 3.53:1 on this cream — fine for a bar or a
-       * border, short of AA's 4.5 for text. So the accent role is a darker step of the same hue
-       * (5.06:1) and #778873 survives as the mid-tone the rules and bars are drawn from.
-       */
+         * Sage on cream. Every ratio below is measured, not estimated.
+         *
+         * The source palette's sage (#778873) measures 3.53:1 on this cream — fine for a bar or a
+         * border, short of AA's 4.5 for text. So the accent role is a darker step of the same hue
+         * (5.06:1) and #778873 survives as the mid-tone the rules and bars are drawn from.
+         */
   --color-bg: #fdf6ed; /* cream from the palette */
   --color-surface: #ffffff;
   --color-rule: #e6dccd;

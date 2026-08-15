@@ -23,8 +23,8 @@
 
 Three things this repo established against a live server, each pinned by a test:
 
-- Hibernate renders an **unregistered** `cb.function("ts_rank", …)` straight through into the SQL — no registration,
-  no validation, Postgres decides. Only the `@@` and `%` **operators** need registering; not `ts_rank`, not
+- Hibernate renders an **unregistered** `cb.function("ts_rank", …)` straight through into the SQL — no registration, no
+  validation, Postgres decides. Only the `@@` and `%` **operators** need registering; not `ts_rank`, not
   `ts_headline`, not `similarity`. Most tutorials register them all, and none of it is necessary.
 - **Postgres 18 changed generated columns to `VIRTUAL` by default**, and a virtual column cannot be indexed. Omit
   `STORED` and you lose the index, not the column — which is a confusing way to find out.
@@ -87,11 +87,11 @@ One request, end to end, naming the file at each hop:
 1. **`SearchController.search`** binds `q`, `mode`, `genre` and a `Pageable`, rejects a blank query and an unreachable
    page, and drops any `sort` — relevance ordering is the retriever's.
 2. **`SearchService.search`** branches on the mode, and that branch is the whole architecture.
-3. *Three retrievers* — **`BookSearchExpressions`** supplies the predicate, the rank expression and the headline;
+3. _Three retrievers_ — **`BookSearchExpressions`** supplies the predicate, the rank expression and the headline;
    `SearchService` assembles them into one `CriteriaQuery` and selects into `SearchResult` with `cb.construct`. The
    `cb.function("fts", …)` call becomes the SQL `?1 @@ ?2` via **`SearchFunctionContributor`**, which is the only reason
    `@@` is reachable from Criteria at all.
-4. *Or FUSED* — **`BookRepository.findFused`**, one native query. Rows arrive as the **`FusedSearchRow`** interface
+4. _Or FUSED_ — **`BookRepository.findFused`**, one native query. Rows arrive as the **`FusedSearchRow`** interface
    projection, and `SearchService.toResult` attaches each retriever's rank.
 5. `PagedModel` on the wire → `api/client.ts` → `useSearch` → `ResultList` / `ResultCard` → `sanitizeHeadline` → the
    `<mark>`s you see.
@@ -120,7 +120,7 @@ mise run demo
 `Ctrl+C` stops everything, including Postgres.
 
 | Port                    | What's there         |
-|-------------------------|----------------------|
+| ----------------------- | -------------------- |
 | `:5173`                 | the frontend         |
 | `:8080/api/search`      | the search API       |
 | `:8080/swagger-ui.html` | interactive API docs |
@@ -128,12 +128,12 @@ mise run demo
 
 Then try these, which each make one retriever earn its place:
 
-| Query         | Mode    | Why it is interesting                               |
-|---------------|---------|-----------------------------------------------------|
-| `whale`       | Lexical | ordinary stemmed match                              |
+| Query         | Mode    | Why it is interesting                                 |
+| ------------- | ------- | ----------------------------------------------------- |
+| `whale`       | Lexical | ordinary stemmed match                                |
 | `Shakespere`  | Fuzzy   | misspelled; the stemmer cannot reach it, trigrams can |
-| `casement`    | Synonym | no book contains the word, six are returned anyway  |
-| `great house` | Fused   | see which retriever found what, and at what rank    |
+| `casement`    | Synonym | no book contains the word, six are returned anyway    |
+| `great house` | Fused   | see which retriever found what, and at what rank      |
 
 Individual tasks:
 
@@ -150,11 +150,10 @@ mise run seed           # regenerate the corpus from Project Gutenberg
 ```
 
 `mise run sql` is the shortest path to seeing what this repo is actually about. It runs
-[`support/demo.sql`](support/demo.sql) against the seeded database with `psql -e`, so each statement
-is echoed above its own result: the lexical match ranked by `ts_rank_cd`, `ts_rank` and `ts_rank_cd`
-disagreeing on the same eleven rows, the stemmer returning nothing for `Stevensen` while trigrams
-return three books, and `casement` returning six books that do not contain the word. No application
-runs at any point.
+[`support/demo.sql`](support/demo.sql) against the seeded database with `psql -e`, so each statement is echoed above its
+own result: the lexical match ranked by `ts_rank_cd`, `ts_rank` and `ts_rank_cd`
+disagreeing on the same eleven rows, the stemmer returning nothing for `Stevensen` while trigrams return three books,
+and `casement` returning six books that do not contain the word. No application runs at any point.
 
 `mise run test` and `mise run check` answer different questions. The first runs the retrievers against a throwaway
 container; the second curls the packaged jar over HTTP and asserts every example query above still returns a non-empty
@@ -166,11 +165,11 @@ Thirty-six tests against a real Postgres — no mocked database anywhere. The fi
 code:
 
 | Finding                                                                                                                                                                                | Test                                                                                                                                |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| Hibernate renders an unregistered `cb.function` name straight through as `name(args)` and lets Postgres decide — which is why only the `@@` and `%` *operators* need `registerPattern` | [`FunctionContributorIT`](src/test/java/dev/lukasgrigis/booksearch/search/hibernate/FunctionContributorIT.java)                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Hibernate renders an unregistered `cb.function` name straight through as `name(args)` and lets Postgres decide — which is why only the `@@` and `%` _operators_ need `registerPattern` | [`FunctionContributorIT`](src/test/java/dev/lukasgrigis/booksearch/search/hibernate/FunctionContributorIT.java)                     |
 | A synonym pair listed in **both** directions is self-cancelling: the substitution runs at index time as well as query time                                                             | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
 | Postgres 18 made generated columns `VIRTUAL` by default, and a virtual column cannot carry an index                                                                                    | [`GeneratedColumnAndSynonymDirectionIT`](src/test/java/dev/lukasgrigis/booksearch/search/GeneratedColumnAndSynonymDirectionIT.java) |
-| `ts_headline` does not escape its input, so the excerpt is escaped *before* it runs                                                                                                    | [`HeadlineIT`](src/test/java/dev/lukasgrigis/booksearch/search/HeadlineIT.java)                                                     |
+| `ts_headline` does not escape its input, so the excerpt is escaped _before_ it runs                                                                                                    | [`HeadlineIT`](src/test/java/dev/lukasgrigis/booksearch/search/HeadlineIT.java)                                                     |
 | RRF surfaces a book that is #1 in no single retriever                                                                                                                                  | [`FusedRankingIT`](src/test/java/dev/lukasgrigis/booksearch/search/FusedRankingIT.java)                                             |
 | Every shipped synonym pair reaches a real seeded book — a pair whose target is missing matches nothing and looks identical to a broken feature                                         | [`SynonymDictionaryCorpusIT`](src/test/java/dev/lukasgrigis/booksearch/search/SynonymDictionaryCorpusIT.java)                       |
 | `ts_rank` and `ts_rank_cd` genuinely disagree on this corpus                                                                                                                           | [`RankOrderingIT`](src/test/java/dev/lukasgrigis/booksearch/search/RankOrderingIT.java)                                             |
@@ -186,9 +185,9 @@ Liquibase creates the dictionary.
 77 public-domain English classics, pulled from Project Gutenberg by a committed script and curated so the demos are
 honest: typo-prone author names for the trigram retriever, prose long enough that `ts_rank` and `ts_rank_cd` genuinely
 disagree, and vocabulary the synonym dictionary can actually reach. Excerpts are real work text, verified against the
-Gutendex API, and a work that fails verification is dropped rather than guessed at.
-The script is [`support/seed/fetch_seed.py`](support/seed/fetch_seed.py); the provenance rules are
-in [`support/seed/README.md`](support/seed/README.md).
+Gutendex API, and a work that fails verification is dropped rather than guessed at. The script is [
+`support/seed/fetch_seed.py`](support/seed/fetch_seed.py); the provenance rules are in [
+`support/seed/README.md`](support/seed/README.md).
 
 Genres are whatever the corpus produced; the frontend fetches them from `GET /api/genres`, so the list cannot drift.
 
@@ -209,7 +208,7 @@ come here for.
 ## Tech stack
 
 | Layer             | What's running                                                                   |
-|-------------------|----------------------------------------------------------------------------------|
+| ----------------- | -------------------------------------------------------------------------------- |
 | App               | Spring Boot 4.1.0, Spring Data JPA 4.1, Hibernate ORM 7.4.1                      |
 | Search            | PostgreSQL 18 (`postgres:18-trixie`) — `tsvector`, `pg_trgm`, synonym dictionary |
 | Migrations        | Liquibase (`spring-boot-starter-liquibase`)                                      |

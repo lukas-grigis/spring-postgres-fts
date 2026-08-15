@@ -17,7 +17,7 @@ services:
       # .../english.stop: No such file or directory" once the directory was mounted whole.
       - ./tsearch_data/book_synonym.syn:/usr/share/postgresql/18/tsearch_data/book_synonym.syn:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U booksearch -d booksearch" ]
+      test: ["CMD-SHELL", "pg_isready -U booksearch -d booksearch"]
       interval: 2s
       timeout: 2s
       retries: 15

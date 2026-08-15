@@ -8,7 +8,8 @@
     <changeSet id="001-extensions" author="spring-postgres-fts">
         <comment>pg_trgm powers the FUZZY retriever: similarity() and the % operator.</comment>
         <sql>
-            CREATE EXTENSION IF NOT EXISTS pg_trgm
+            CREATE
+            EXTENSION IF NOT EXISTS pg_trgm
         </sql>
     </changeSet>
 
