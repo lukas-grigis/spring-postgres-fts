@@ -50,11 +50,12 @@ public interface BookRepository extends JpaRepository<BookEntity, Long>, JpaSpec
                 ORDER BY rank
                 LIMIT :limitPerRetriever
             ),
-            /* The three-way FULL OUTER JOIN keeps a book that only one retriever found, and the
-               COALESCE in the second ON clause is what makes that work: after the first join an
+            /* The three-way FULL OUTER JOIN keeps a book that only one retriever found. The
+               COALESCE in the second ON clause keeps each book on one row: after the first join an
                id lives in l.id or in f.id but not reliably in either, so joining synonym on l.id
-               alone would drop every fuzzy-only match. COALESCE(l.id, f.id) is also unique across
-               that intermediate result (an id appears at most once per CTE), so no row is
+               alone would split a book that fuzzy and synonym both found, but lexical missed, into
+               two rows, each carrying only part of its score. COALESCE(l.id, f.id) is also unique
+               across that intermediate result (an id appears at most once per CTE), so no row is
                duplicated. The OR form `s.id = l.id OR s.id = f.id` is not equivalent and Postgres
                rejects it outright: FULL JOIN needs a hashable or mergeable condition.
             
